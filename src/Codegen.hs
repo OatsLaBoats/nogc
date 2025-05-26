@@ -7,6 +7,11 @@ import Data.Map (Map)
 
 import qualified Ir
 
+ng_entryPoint = "ng_main"
+ng_String = "struct ng_String"
+ng_Int = "ng_Int"
+ng_StringSlice = "struct ng_StringSlice"
+
 -- Codegen should be super simple and straight forward if you need to do something special that should be done in the IR
 data Context = Context
     { getLocals :: Map Ir.Identifier Ir.Type
@@ -98,22 +103,21 @@ type ExprResult = String
 type VarId = Int
 
 -- All expression results are stored in a temporary variable before being used.
--- This bypasses the limitations of C and the compiler optimizis it all away anyway.
--- VarId should be something else cause it is causing issues
+-- This bypasses the limitations of C and the compiler optimizes it all away anyway.
 generateExpr :: Context -> Ir.Expr -> (String, ExprResult, Context)
 generateExpr ctx@(Context locals varIndex) expr = case expr of
     Ir.StringL str ->
-        let var = generateTempVar ctx in
+        let var = generateTempVarName ctx in
         (generateVariable Ir.StringT var ++ "\n" ++
          generateAssignment var (generateStringL str) ++ "\n",
          var, Context locals $ varIndex + 1)
     Ir.StringSliceL str ->
-        let var = generateTempVar ctx in
+        let var = generateTempVarName ctx in
         (generateVariable Ir.StringSliceT var ++ "\n" ++
          generateAssignment var (generateStringSliceL str) ++ "\n",
          var, Context locals $ varIndex + 1)
     Ir.IntL n ->
-        let var = generateTempVar ctx in
+        let var = generateTempVarName ctx in
         (generateVariable Ir.IntT var ++ "\n" ++
          generateAssignment var (show n) ++ "\n",
          var, Context locals $ varIndex + 1)
@@ -124,22 +128,31 @@ generateExpr ctx@(Context locals varIndex) expr = case expr of
         let (src2, res2, ctx2) = generateExpr ctx1 cont in
         (src1 ++ src2, res2, ctx2)
 
-    Ir.ChainDef name tp action cont ->
-        let (src1, res1, Context locals1 varIndex1) = generateExpr ctx action in
-        let ctx1 = Context (Map.insert name tp locals1) varIndex1 in
-        let (src2, res2, ctx2) = generateExpr ctx1 cont in
-        (generateVariable tp name ++ "\n" ++ src1 ++ generateAssignment name res1 ++ "\n" ++ src2, res2, ctx2)
-
     Ir.Clone name -> case fromJust $ Map.lookup name locals of
         Ir.IntT -> ("", name, ctx)
+
+        Ir.StringT ->
+            let var = generateTempVarName ctx in
+            (generateVariable Ir.StringT var ++ "\n" ++
+             generateAssignment var (cloneString $ sliceString name) ++ "\n",
+             var, Context locals (varIndex + 1))
+
+        Ir.StringSliceT ->
+            let var = generateTempVarName ctx in
+            (generateVariable Ir.StringT var ++ "\n" ++
+             generateAssignment var (cloneString name) ++ "\n",
+             var, Context locals (varIndex + 1))
         _ -> undefined
+
+    Ir.Move name -> ("", name, ctx)
 
     Ir.Slice name -> case fromJust $ Map.lookup name locals of
         Ir.StringT ->
-            let var = generateTempVar ctx in
+            let var = generateTempVarName ctx in
             (generateVariable Ir.StringSliceT var ++ "\n" ++ 
              generateAssignment var (sliceString name) ++ "\n",
              var, Context locals (varIndex + 1))
+
         Ir.StringSliceT -> ("", name, ctx)
         _ -> undefined
 
@@ -150,6 +163,7 @@ generateExpr ctx@(Context locals varIndex) expr = case expr of
                 _ -> undefined
         in
 
+        -- This is unreadable.
         let (params', paramSrc, ctx'@(Context locals' varIndex')) = foldl (\(acc, src, ctx1) e ->
                 let (src', res', ctx2) = generateExpr ctx1 e 
                 in (acc ++ [res'], src ++ src', ctx2))
@@ -160,12 +174,22 @@ generateExpr ctx@(Context locals varIndex) expr = case expr of
             Ir.UnitT -> 
                 (paramSrc ++ fn ++ "(" ++ (foldl (\acc p -> acc ++ (if null acc then "" else ",") ++ p) "" params') ++ ");\n", "", ctx')
             _ ->
-                let var = generateTempVar ctx' in
+                let var = generateTempVarName ctx' in
                 (paramSrc ++
                  generateVariable retType var ++ "\n" ++
                  generateAssignment var
-                 (fn ++ "(" ++ (foldl (\acc p -> acc ++ (if null acc then "" else ",") ++ p) "" params') ++ ")") ++ "\n", var,
-                  Context locals' $ varIndex' + 1)
+                 (fn ++ "(" ++ (foldl (\acc p -> acc ++ (if null acc then "" else ",") ++ p) "" params') ++ ")") ++ "\n",
+                 var,
+                 Context locals' $ varIndex' + 1)
+
+    Ir.Mutate name value ->
+        let (src1, res1, ctx1) = generateExpr ctx value in
+        (src1 ++ generateAssignment name res1 ++ "\n", "", ctx1)
+
+    Ir.Def name tp value ->
+        let (src1, res1, Context locals1 varIndex1) = generateExpr ctx value in
+        let ctx1 = Context (Map.insert name tp locals1) varIndex1 in
+        (src1 ++ generateVariable tp name ++ "\n" ++ generateAssignment name res1 ++ "\n", "", ctx1)
 
     Ir.Drop vars ->
         (foldl
@@ -176,7 +200,7 @@ generateExpr ctx@(Context locals varIndex) expr = case expr of
 
     _ -> undefined
     where
-        generateTempVar (Context _ i) = "_ng_tmpvar_" ++ show i
+        generateTempVarName (Context _ i) = "_ng_tmpvar_" ++ show i
         generateVariable type' name = typeToString type' ++ " " ++ name ++ ";"
         generateAssignment name e = name ++ "=" ++ e ++ ";"
 
@@ -189,10 +213,8 @@ generateStringSliceL s = "(" ++ ng_StringSlice ++ "){.len=" ++ show (length s) +
 sliceString :: String -> String
 sliceString name = "ng_sliceString(" ++ name ++ ")"
 
-ng_entryPoint = "ng_main"
-ng_String = "struct ng_String"
-ng_Int = "ng_Int"
-ng_StringSlice = "struct ng_StringSlice"
+cloneString :: String -> String
+cloneString name = "ng_cloneString(" ++ name ++ ")"
 
 typeToString :: Ir.Type -> String
 typeToString t = case t of

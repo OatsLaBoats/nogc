@@ -20,9 +20,9 @@ static ng_Unit ng_main(ng_Unit){
 struct ng_StringSlice _ng_tmpvar_0;
 _ng_tmpvar_0=ng_sliceString(aString);
 ng_printLn(_ng_tmpvar_0);
-struct ng_String ls;
 struct ng_String _ng_tmpvar_1;
 _ng_tmpvar_1=(struct ng_String){.cap=0,.len=22,.mem="You look lovely today!"};
+struct ng_String ls;
 ls=_ng_tmpvar_1;
 ng_Int _ng_tmpvar_2;
 _ng_tmpvar_2=10;

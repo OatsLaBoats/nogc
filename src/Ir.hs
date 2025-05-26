@@ -24,17 +24,20 @@ data Type
 -- For fun lets try to hand compile this program
 -- No optimization
 myCompiledIr
-    = Function "main" [] UnitT 
+    = Extern "ng_printLn" (FunctionT [StringSliceT] UnitT)
+    : Extern "ng_addInt" (FunctionT [IntT, IntT] IntT)
+    : Extern "ng_subInt" (FunctionT [IntT, IntT] IntT)
+
+    : Static "aString" StringT (StringL "Hello, Great Queen Lyra!\\n")
+    : Static "anInt" IntT (IntL 10)
+
+    : Function "main" [] UnitT 
         (Chain (Run "ng_printLn" [Slice "aString"])
-        (ChainDef "ls" StringT (StringL "You look lovely today!")
+        (Chain (Def "ls" StringT (StringL "You look lovely today!"))
         (Chain (Run "testMath" [IntL 10, IntL 4])
         (Chain (Run "ng_printLn" [StringSliceL "You look great!"]) (Drop ["ls"])
         ))))
-    : Static "aString" StringT (StringL "Hello, Great Queen Lyra!\\n")
-    : Static "anInt" IntT (IntL 10)
-    : Extern "ng_printLn" (FunctionT [StringSliceT] UnitT)
-    : Extern "ng_addInt" (FunctionT [IntT, IntT] IntT)
-    : Extern "ng_subInt" (FunctionT [IntT, IntT] IntT)
+
     : Function "testMath" [("a", IntT), ("b", IntT)] IntT
         (Run "ng_addInt" [Clone "a", Run "ng_subInt" [IntL 10, Clone "b"]])
     : []
@@ -51,7 +54,6 @@ data Expr
 
     -- These are used to chain expressions into something resembling procedural code
     | Chain Expr Expr
-    | ChainDef Identifier Type Expr Expr
 
     -- Literals
     | StringL String
@@ -63,14 +65,16 @@ data Expr
     | New MemType Type -- Will initialize the variable to be allocated in the heap. This can might happen immidietly like for a recursive sum type or lazily like for a string or list
     | Drop [Identifier]
 
-    -- Passing existing values
+    -- Passing values values
     | Borrow Identifier -- This never gets to the code generator
+
     | Move Identifier
     | Clone Identifier
     | Ref Identifier
     | Slice Identifier
 
-    | Mutate Identifier Expr -- Changes the value of a variable
+    | Def Identifier Type Expr -- Creates a new value returns Unit
+    | Mutate Identifier Expr -- Changes the value of a variable returns Unit
     | Run Identifier [Expr]
 
 data MemType = Heap | Arena

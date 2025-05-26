@@ -24,9 +24,10 @@ struct ng_StringSlice {
     const char *mem;
 };
 
-static struct ng_StringSlice ng_sliceString(const struct ng_String str);
+static inline struct ng_StringSlice ng_sliceString(const struct ng_String str);
+static inline struct ng_String ng_cloneString(const struct ng_StringSlice str);
 static inline ng_Unit ng_dropString(const struct ng_String str);
-static ng_Unit ng_printLn(struct ng_StringSlice str);
+static inline ng_Unit ng_printLn(struct ng_StringSlice str);
 static inline ng_Int ng_addInt(ng_Int a, ng_Int b);
 static inline ng_Int ng_subInt(ng_Int a, ng_Int b);
 
