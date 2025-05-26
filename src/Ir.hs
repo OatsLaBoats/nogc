@@ -32,6 +32,7 @@ myCompiledIr
     = Extern "ng_printLn" (FunctionT [StringSliceT] UnitT)
     : Extern "ng_addInt" (FunctionT [IntT, IntT] IntT)
     : Extern "ng_subInt" (FunctionT [IntT, IntT] IntT)
+    : Extern "ng_eqInt" (FunctionT [IntT, IntT] BoolT)
 
     : Static "aString" StringT (StringL "Hello, Great Queen Lyra!\\n")
     : Static "anInt" IntT (IntL 10)
@@ -46,8 +47,17 @@ myCompiledIr
 
     : Function "testMath" [("a", IntT), ("b", IntT)] IntT
         (Run "ng_addInt" [Clone "a", Run "ng_subInt" [IntL 10, Clone "b"]])
+
     : Function "testFunc" [("x", BoolT)] IntT
         (Cond (Clone "x") (IntL 10) (IntL 20))
+
+    : Function "fibonacci" [("i", IntT)] IntT
+        (Cond (Run "ng_eqInt" [Clone "i", IntL 0]) (IntL 0)
+        (Cond (Run "ng_eqInt" [Clone "i", IntL 1]) (IntL 1)
+            (Run "ng_addInt" 
+                [Run "fibonacci" [Run "ng_subInt" [Clone "i", IntL 1]],
+                 Run "fibonacci" [Run "ng_subInt" [Clone "i", IntL 2]]]
+        )))
     : []
 
 data Construct

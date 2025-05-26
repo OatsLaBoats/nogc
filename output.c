@@ -3,66 +3,56 @@
 static const ng_Int anInt=10;
 static const struct ng_String aString=(struct ng_String){.cap=0,.len=26,.mem="Hello, Great Queen Lyra!\n"};
 
+static ng_Int fibonacci(ng_Int i);
 static ng_Int testFunc(ng_Bool x);
 static ng_Int testMath(ng_Int a,ng_Int b);
 static ng_Unit ng_main(ng_Unit);
 
-static ng_Int testFunc(ng_Bool x){
+static ng_Int fibonacci(ng_Int i){
 ng_Int _ng_tmpvar_0;
-if(x){
-ng_Int _ng_tmpvar_1;
-_ng_tmpvar_1=10;
-_ng_tmpvar_0=_ng_tmpvar_1;
+if(ng_eqInt(i,0)){
+_ng_tmpvar_0=0;
 }
 else {
 ng_Int _ng_tmpvar_1;
-_ng_tmpvar_1=20;
+if(ng_eqInt(i,1)){
+_ng_tmpvar_1=1;
+}
+else {
+_ng_tmpvar_1=ng_addInt(fibonacci(ng_subInt(i,1)),fibonacci(ng_subInt(i,2)));
+}
 _ng_tmpvar_0=_ng_tmpvar_1;
 }
 return _ng_tmpvar_0;
 }
 
-static ng_Int testMath(ng_Int a,ng_Int b){
+static ng_Int testFunc(ng_Bool x){
 ng_Int _ng_tmpvar_0;
+if(x){
 _ng_tmpvar_0=10;
-ng_Int _ng_tmpvar_1;
-_ng_tmpvar_1=ng_subInt(_ng_tmpvar_0,b);
-ng_Int _ng_tmpvar_2;
-_ng_tmpvar_2=ng_addInt(a,_ng_tmpvar_1);
-return _ng_tmpvar_2;
+}
+else {
+_ng_tmpvar_0=20;
+}
+return _ng_tmpvar_0;
+}
+
+static ng_Int testMath(ng_Int a,ng_Int b){
+return ng_addInt(a,ng_subInt(10,b));
 }
 
 static ng_Unit ng_main(ng_Unit){
-struct ng_StringSlice _ng_tmpvar_0;
-_ng_tmpvar_0=ng_sliceString(aString);
-ng_printLn(_ng_tmpvar_0);
-struct ng_String _ng_tmpvar_1;
-_ng_tmpvar_1=(struct ng_String){.cap=0,.len=22,.mem="You look lovely today!"};
+ng_printLn(ng_sliceString(aString));
 struct ng_String ls;
-ls=_ng_tmpvar_1;
-ng_Int _ng_tmpvar_2;
-_ng_tmpvar_2=10;
-ng_Int _ng_tmpvar_3;
-_ng_tmpvar_3=4;
-ng_Int _ng_tmpvar_4;
-_ng_tmpvar_4=testMath(_ng_tmpvar_2,_ng_tmpvar_3);
-ng_Int _ng_tmpvar_5;
-ng_Bool _ng_tmpvar_6;
-_ng_tmpvar_6=true;
-if(_ng_tmpvar_6){
-ng_Int _ng_tmpvar_7;
-_ng_tmpvar_7=10;
-_ng_tmpvar_5=_ng_tmpvar_7;
+ls=(struct ng_String){.cap=0,.len=22,.mem="You look lovely today!"};
+ng_Int _ng_tmpvar_0;
+if(true){
+_ng_tmpvar_0=10;
 }
 else {
-ng_Int _ng_tmpvar_7;
-_ng_tmpvar_7=20;
-_ng_tmpvar_5=_ng_tmpvar_7;
+_ng_tmpvar_0=20;
 }
-struct ng_StringSlice _ng_tmpvar_7;
-_ng_tmpvar_7=(struct ng_StringSlice){.len=15,.mem="You look great!"};
-ng_printLn(_ng_tmpvar_7);
-    printf("%lld", testFunc(false));
+ng_printLn((struct ng_StringSlice){.len=15,.mem="You look great!"});
 ng_dropString(ls);
 }
 

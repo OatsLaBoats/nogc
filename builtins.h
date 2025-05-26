@@ -32,6 +32,11 @@ static inline ng_Unit ng_dropString(const struct ng_String str);
 static inline ng_Unit ng_printLn(struct ng_StringSlice str);
 static inline ng_Int ng_addInt(ng_Int a, ng_Int b);
 static inline ng_Int ng_subInt(ng_Int a, ng_Int b);
+static inline ng_Bool ng_eqInt(ng_Int a, ng_Int b);
+
+static inline ng_Bool ng_eqInt(ng_Int a, ng_Int b) {
+    return a == b;
+}
 
 static inline ng_Int ng_addInt(ng_Int a, ng_Int b) {
     return a + b;
