@@ -9,13 +9,13 @@ type Identifier = String
 
 data Type 
     = UnitT
+    | BoolT
     | IntT
     | StringT
     | StringSliceT
     | FunctionT [Type] Type
     | BorrowT Type
     | RefT Type
-
 
 -- How does interop with c work when we don't know if the C code takes a reference or an owned value?
 -- I think we have to just pass everything by reference and just ask people to not modify the value...
@@ -59,10 +59,10 @@ data Expr
     | StringL String
     | StringSliceL String
     | IntL Int
+    | BoolL Bool
     | UnitL
     
     -- Memory allocation instructions
-    | New MemType Type -- Will initialize the variable to be allocated in the heap. This can might happen immidietly like for a recursive sum type or lazily like for a string or list
     | Drop [Identifier]
 
     -- Passing values values

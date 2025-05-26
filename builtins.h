@@ -5,11 +5,13 @@
 #include <stdlib.h>
 #include <string.h>
 #include <assert.h>
+#include <stdbool.h>
 
 #define PTR(T) const T * const
 #define  ng_Unit void
 
 typedef int64_t ng_Int;
+typedef bool ng_Bool;
 
 struct ng_String {
     size_t cap;

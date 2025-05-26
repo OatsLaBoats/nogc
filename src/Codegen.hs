@@ -10,6 +10,7 @@ import qualified Ir
 ng_entryPoint = "ng_main"
 ng_String = "struct ng_String"
 ng_Int = "ng_Int"
+ng_Bool = "ng_Bool"
 ng_StringSlice = "struct ng_StringSlice"
 
 -- Codegen should be super simple and straight forward if you need to do something special that should be done in the IR
@@ -121,6 +122,11 @@ generateExpr ctx@(Context locals varIndex) expr = case expr of
         (generateVariable Ir.IntT var ++ "\n" ++
          generateAssignment var (show n) ++ "\n",
          var, Context locals $ varIndex + 1)
+    Ir.BoolL b ->
+        let var = generateTempVarName ctx in
+        (generateVariable Ir.BoolT var ++ "\n" ++
+         generateAssignment var (if b then "true" else "false") ++ "\n",
+         var, Context locals $ varIndex + 1)
     Ir.UnitL -> ("", "", ctx)
 
     Ir.Chain action cont ->
@@ -130,6 +136,7 @@ generateExpr ctx@(Context locals varIndex) expr = case expr of
 
     Ir.Clone name -> case fromJust $ Map.lookup name locals of
         Ir.IntT -> ("", name, ctx)
+        Ir.BoolT -> ("", name, ctx)
 
         Ir.StringT ->
             let var = generateTempVarName ctx in
@@ -142,6 +149,7 @@ generateExpr ctx@(Context locals varIndex) expr = case expr of
             (generateVariable Ir.StringT var ++ "\n" ++
              generateAssignment var (cloneString name) ++ "\n",
              var, Context locals (varIndex + 1))
+
         _ -> undefined
 
     Ir.Move name -> ("", name, ctx)
@@ -220,5 +228,6 @@ typeToString :: Ir.Type -> String
 typeToString t = case t of
     Ir.StringT -> ng_String
     Ir.IntT -> ng_Int
+    Ir.BoolT -> ng_Bool
     Ir.StringSliceT -> ng_StringSlice
     _ -> undefined
