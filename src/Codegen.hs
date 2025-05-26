@@ -4,6 +4,7 @@ import Data.Function
 import Data.Maybe
 import qualified Data.Map as Map
 import Data.Map (Map)
+import Debug.Trace
 
 import qualified Ir
 
@@ -12,6 +13,9 @@ ng_String = "struct ng_String"
 ng_Int = "ng_Int"
 ng_Bool = "ng_Bool"
 ng_StringSlice = "struct ng_StringSlice"
+
+-- used when an expression returns a unit type
+unit = "_ng_unit"
 
 -- Codegen should be super simple and straight forward if you need to do something special that should be done in the IR
 data Context = Context
@@ -55,11 +59,13 @@ generateOutput ir = foldl pred output ir
                 Ir.IntL n ->
                     addGlobal ("static const " ++ ng_Int ++ " " ++ name ++ "=" ++ show n ++ ";") acc
                 _ -> acc
+
             Ir.Function name' params returnType expr ->
                 let name = if name' == "main" then ng_entryPoint else name' in
-                let locals = foldl (\acc (name, t) -> Map.insert name t acc) context params in
+                let locals1 = Map.insert unit Ir.UnitT context in
+                let locals2 = foldl (\acc (name, t) -> Map.insert name t acc) locals1 params in
                 let signature = generateFunctionSignature name params returnType in
-                let body = generateFunctionBody (Context locals 0) expr returnType in
+                let body = generateFunctionBody (Context locals2 0) expr returnType in
                 addDeclaration (signature ++ ";") . addFunction (signature ++ body) $ acc
             _ -> acc
 
@@ -111,23 +117,45 @@ generateExpr ctx@(Context locals varIndex) expr = case expr of
         let var = generateTempVarName ctx in
         (generateVariable Ir.StringT var ++ "\n" ++
          generateAssignment var (generateStringL str) ++ "\n",
-         var, Context locals $ varIndex + 1)
+         var, Context (Map.insert var Ir.StringT locals) $ varIndex + 1)
+
     Ir.StringSliceL str ->
         let var = generateTempVarName ctx in
         (generateVariable Ir.StringSliceT var ++ "\n" ++
          generateAssignment var (generateStringSliceL str) ++ "\n",
-         var, Context locals $ varIndex + 1)
+         var, Context (Map.insert var Ir.StringSliceT locals) $ varIndex + 1)
+
     Ir.IntL n ->
         let var = generateTempVarName ctx in
         (generateVariable Ir.IntT var ++ "\n" ++
          generateAssignment var (show n) ++ "\n",
-         var, Context locals $ varIndex + 1)
+         var, Context (Map.insert var Ir.IntT locals) $ varIndex + 1)
+
     Ir.BoolL b ->
         let var = generateTempVarName ctx in
         (generateVariable Ir.BoolT var ++ "\n" ++
          generateAssignment var (if b then "true" else "false") ++ "\n",
-         var, Context locals $ varIndex + 1)
-    Ir.UnitL -> ("", "", ctx)
+         var, Context (Map.insert var Ir.BoolT locals) $ varIndex + 1)
+
+    Ir.UnitL -> ("", unit, ctx)
+
+    Ir.Cond cond trueBranch falseBranch ->
+        let var = generateTempVarName ctx in
+        let (src1, res1, ctx1) = generateExpr (Context locals (varIndex + 1)) cond in
+        let (src2, res2, ctx2) = generateExpr ctx1 trueBranch in
+        let (src3, res3, _) = generateExpr ctx1 falseBranch in
+        let tp = fromJust $ Map.lookup res2 (getLocals ctx2) in
+        if Ir.isUnit tp then
+            (src1 ++ 
+             "if(" ++ res1 ++ "){\n" ++ src2 ++ "}\n" ++
+             "else {\n" ++ src3 ++ "}\n",
+             var, ctx1)
+        else
+            (generateVariable tp var ++ "\n" ++ 
+             src1 ++ 
+             "if(" ++ res1 ++ "){\n" ++ src2 ++ generateAssignment var res2 ++ "\n}\n" ++
+             "else {\n" ++ src3 ++ generateAssignment var res3 ++ "\n}\n",
+             var, ctx1)
 
     Ir.Chain action cont ->
         let (src1, _, ctx1) = generateExpr ctx action in
@@ -142,13 +170,13 @@ generateExpr ctx@(Context locals varIndex) expr = case expr of
             let var = generateTempVarName ctx in
             (generateVariable Ir.StringT var ++ "\n" ++
              generateAssignment var (cloneString $ sliceString name) ++ "\n",
-             var, Context locals (varIndex + 1))
+             var, Context (Map.insert var Ir.StringT locals) (varIndex + 1))
 
         Ir.StringSliceT ->
             let var = generateTempVarName ctx in
             (generateVariable Ir.StringT var ++ "\n" ++
              generateAssignment var (cloneString name) ++ "\n",
-             var, Context locals (varIndex + 1))
+             var, Context (Map.insert var Ir.StringT locals) (varIndex + 1))
 
         _ -> undefined
 
@@ -159,7 +187,7 @@ generateExpr ctx@(Context locals varIndex) expr = case expr of
             let var = generateTempVarName ctx in
             (generateVariable Ir.StringSliceT var ++ "\n" ++ 
              generateAssignment var (sliceString name) ++ "\n",
-             var, Context locals (varIndex + 1))
+             var, Context (Map.insert var Ir.StringSliceT locals) (varIndex + 1))
 
         Ir.StringSliceT -> ("", name, ctx)
         _ -> undefined
@@ -188,7 +216,7 @@ generateExpr ctx@(Context locals varIndex) expr = case expr of
                  generateAssignment var
                  (fn ++ "(" ++ (foldl (\acc p -> acc ++ (if null acc then "" else ",") ++ p) "" params') ++ ")") ++ "\n",
                  var,
-                 Context locals' $ varIndex' + 1)
+                 Context (Map.insert var retType locals') $ varIndex' + 1)
 
     Ir.Mutate name value ->
         let (src1, res1, ctx1) = generateExpr ctx value in

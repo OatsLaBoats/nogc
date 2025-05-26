@@ -16,6 +16,11 @@ data Type
     | FunctionT [Type] Type
     | BorrowT Type
     | RefT Type
+    deriving Show
+
+isUnit :: Type -> Bool
+isUnit UnitT = True
+isUnit _ = False
 
 -- How does interop with c work when we don't know if the C code takes a reference or an owned value?
 -- I think we have to just pass everything by reference and just ask people to not modify the value...
@@ -35,11 +40,14 @@ myCompiledIr
         (Chain (Run "ng_printLn" [Slice "aString"])
         (Chain (Def "ls" StringT (StringL "You look lovely today!"))
         (Chain (Run "testMath" [IntL 10, IntL 4])
+        (Chain (Cond (BoolL True) (IntL 10) (IntL 20))
         (Chain (Run "ng_printLn" [StringSliceL "You look great!"]) (Drop ["ls"])
-        ))))
+        )))))
 
     : Function "testMath" [("a", IntT), ("b", IntT)] IntT
         (Run "ng_addInt" [Clone "a", Run "ng_subInt" [IntL 10, Clone "b"]])
+    : Function "testFunc" [("x", BoolT)] IntT
+        (Cond (Clone "x") (IntL 10) (IntL 20))
     : []
 
 data Construct
@@ -51,6 +59,8 @@ data Expr
     -- These are useful for tail recursion later
     = JumpTag Expr
     | Jump Expr
+
+    | Cond Expr Expr Expr -- condition trueBranch falseBranch
 
     -- These are used to chain expressions into something resembling procedural code
     | Chain Expr Expr
