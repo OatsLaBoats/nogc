@@ -43,8 +43,7 @@ return ng_addInt(a,ng_subInt(10,b));
 
 static ng_Unit ng_main(ng_Unit){
 ng_printLn(ng_sliceString(aString));
-struct ng_String ls;
-ls=(struct ng_String){.cap=0,.len=22,.mem="You look lovely today!"};
+struct ng_String ls=(struct ng_String){.cap=0,.len=22,.mem="You look lovely today!"};
 ng_Int _ng_tmpvar_0;
 if(true){
 _ng_tmpvar_0=10;

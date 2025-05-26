@@ -191,7 +191,7 @@ generateExpr ctx@(Context locals varIndex) expr = case expr of
     Ir.Def name tp value ->
         let (src1, res1, _, Context locals1 varIndex1) = generateExpr ctx value in
         let ctx1 = Context (Map.insert name tp locals1) varIndex1 in
-        (src1 ++ generateVariable tp name ++ "\n" ++ generateAssignment name res1 ++ "\n", "", Ir.UnitT, ctx1)
+        (src1 ++ generateInitializedVariable tp name res1 ++ "\n", "", Ir.UnitT, ctx1)
 
     Ir.Drop vars ->
         (foldl
@@ -205,6 +205,7 @@ generateExpr ctx@(Context locals varIndex) expr = case expr of
         generateTempVarName (Context _ i) = "_ng_tmpvar_" ++ show i
         generateVariable type' name = typeToString type' ++ " " ++ name ++ ";"
         generateAssignment name e = name ++ "=" ++ e ++ ";"
+        generateInitializedVariable type' name e = typeToString type' ++ " " ++ name ++ "=" ++ e ++ ";"
 
 generateStringL :: String -> String
 generateStringL s = "(" ++ ng_String ++ "){.cap=0,.len=" ++ show (length s) ++ ",.mem=\"" ++ s ++ "\"}"
