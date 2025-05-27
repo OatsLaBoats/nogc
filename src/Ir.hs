@@ -58,6 +58,20 @@ myCompiledIr
                 [Run "fibonacci" [Run "ng_subInt" [Clone "i", IntL 1]],
                  Run "fibonacci" [Run "ng_subInt" [Clone "i", IntL 2]]]
         )))
+
+    : Function "fib" [("n", IntT)] IntT
+        (Run "_fib" [Clone "n", IntL 0, IntL 1, IntL 0])
+
+    : Function "_fib" [("n", IntT), ("a", IntT), ("b", IntT), ("index", IntT)] IntT
+        (Chain (Label "tailcall")
+        (Cond (Run "ng_eqInt" [Clone "index", Clone "n"]) (Clone "a")
+        (Chain (Def "c" IntT (Clone "a"))
+        (Chain (Mutate "a" (Clone "b"))
+        (Chain (Mutate "b" (Run "ng_addInt" [Clone "c", Clone "b"]))
+        (Chain (Mutate "index" (Run "ng_addInt" [Clone "index", IntL 1]))
+        (Jump "tailcall")
+        ))))))
+        
     : []
 
 data Construct
@@ -67,8 +81,8 @@ data Construct
 
 data Expr
     -- These are useful for tail recursion later
-    = JumpTag Expr
-    | Jump Expr
+    = Label String
+    | Jump String
 
     | Cond Expr Expr Expr -- condition trueBranch falseBranch
 

@@ -122,22 +122,29 @@ generateExpr ctx@(Context locals varIndex) expr = case expr of
     Ir.BoolL b -> ("", if b then "true" else "false", Ir.BoolT, ctx)
     Ir.UnitL -> ("", "", Ir.UnitT, ctx)
 
+    Ir.Label name -> (name ++ ":;\n", "", Ir.UnitT, ctx)
+    Ir.Jump label -> ("goto " ++ label ++ ";\n", "", Ir.UnitT, ctx)
+
     Ir.Cond cond trueBranch falseBranch ->
         let var = generateTempVarName ctx in
         let (src1, res1, _, ctx1) = generateExpr (Context locals (varIndex + 1)) cond in
         let (src2, res2, type2, _) = generateExpr ctx1 trueBranch in
-        let (src3, res3, _, _) = generateExpr ctx1 falseBranch in
-        if Ir.isUnit type2 then
+        let (src3, res3, type3, _) = generateExpr ctx1 falseBranch in
+        if Ir.isUnit type2 && Ir.isUnit type3 then
             (src1 ++ 
              "if(" ++ res1 ++ "){\n" ++ src2 ++ "}\n" ++
              "else {\n" ++ src3 ++ "}\n",
-             var, type2, ctx1)
+             var, Ir.UnitT, ctx1)
         else
             (generateVariable type2 var ++ "\n" ++ 
              src1 ++ 
-             "if(" ++ res1 ++ "){\n" ++ src2 ++ generateAssignment var res2 ++ "\n}\n" ++
-             "else {\n" ++ src3 ++ generateAssignment var res3 ++ "\n}\n",
-             var, type2, ctx1)
+             "if(" ++ res1 ++ "){\n" ++ src2 ++
+                (if Ir.isUnit type2 then "" else generateAssignment var res2 ++ "\n") ++
+             "}\n" ++
+             "else {\n" ++ src3 ++ 
+                (if Ir.isUnit type3 then "" else generateAssignment var res3 ++ "\n") ++
+             "}\n",
+             var, if Ir.isUnit type2 then type3 else type2, ctx1)
 
     Ir.Chain action cont ->
         let (src1, _, _, ctx1) = generateExpr ctx action in

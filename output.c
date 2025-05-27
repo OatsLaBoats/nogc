@@ -3,10 +3,32 @@
 static const ng_Int anInt=10;
 static const struct ng_String aString=(struct ng_String){.cap=0,.len=26,.mem="Hello, Great Queen Lyra!\n"};
 
+static ng_Int _fib(ng_Int n,ng_Int a,ng_Int b,ng_Int index);
+static ng_Int fib(ng_Int n);
 static ng_Int fibonacci(ng_Int i);
 static ng_Int testFunc(ng_Bool x);
 static ng_Int testMath(ng_Int a,ng_Int b);
 static ng_Unit ng_main(ng_Unit);
+
+static ng_Int _fib(ng_Int n,ng_Int a,ng_Int b,ng_Int index){
+tailcall:;
+ng_Int _ng_tmpvar_0;
+if(ng_eqInt(index,n)){
+_ng_tmpvar_0=a;
+}
+else {
+ng_Int c=a;
+a=b;
+b=ng_addInt(c,b);
+index=ng_addInt(index,1);
+goto tailcall;
+}
+return _ng_tmpvar_0;
+}
+
+static ng_Int fib(ng_Int n){
+return _fib(n,0,1,0);
+}
 
 static ng_Int fibonacci(ng_Int i){
 ng_Int _ng_tmpvar_0;
