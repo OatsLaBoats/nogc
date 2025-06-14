@@ -21,13 +21,14 @@ main = do
 
 library :: [Binding]
 library
-    = Declaration "printLn" (NgFunction [NgString] NgUnit)
+    = Extern "ng_printLn" (FunctionT [StringT] UnitT)
+    : Extern "ng_addInt" (FunctionT [OwnedT IntT, OwnedT IntT] IntT)
     : []
 
 program :: [Binding]
 program
-    = Binding "anInt" NgInt (IntLit 10)
-    : Binding "aString" NgString (StringLit "Hello World")
-    : Binding "main" (NgFunction [] NgUnit) (Lambda [] 
-        (Do (Call (Get "printLn") [Get "aString"]) UnitLit))
+    = Binding "anInt" IntT (IntL 10)
+    : Binding "aString" StringT (StringL "Hello World")
+    : Binding "main" (FunctionT [] UnitT) (Lambda [] 
+        (Do (Call (Get "printLn") [Get "aString"]) UnitL))
     : []

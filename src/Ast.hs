@@ -1,30 +1,31 @@
 module Ast where
 
 data Type
-    = NgUnit
-    | NgInt 
-    | NgString
-    | NgFunction [Type] Type
+    = UnitT
+    | IntT
+    | StringT
+    | FunctionT [Type] Type
+    | OwnedT Type -- This is used to ensure that some function parameters are owned Only useful for parameters as the return type is always owned
     deriving Eq
 
 data Binding
     = Binding Name Type Expr
-    | Declaration Name Type
+    | Extern Name Type
 
 bindingName :: Binding -> Name
 bindingName (Binding name _ _) = name
-bindingName (Declaration name _) = name
+bindingName (Extern name _) = name
 
 bindingType :: Binding -> Type
 bindingType (Binding _ btype _) = btype
-bindingType (Declaration _ btype) = btype
+bindingType (Extern _ btype) = btype
 
 type Name = String
 
 data Expr
-    = UnitLit
-    | IntLit Int
-    | StringLit String
+    = UnitL
+    | IntL Int
+    | StringL String
     | Let Name Type Expr Expr
     | Do Expr Expr
     | Lambda [(Name, Type)] Expr -- Params Ret-type Expr

@@ -21,7 +21,7 @@ typecheck bindings = loop bindings
                 msg -> msg
 
 typecheckBinding :: Context -> Binding -> Maybe String
-typecheckBinding _ (Declaration _ _) = Nothing
+typecheckBinding _ (Extern _ _) = Nothing
 typecheckBinding ctx (Binding _ btype expr) = 
     case typecheckExpr ctx expr of
         Left msg -> Just msg
@@ -32,9 +32,9 @@ typecheckBinding ctx (Binding _ btype expr) =
 
 typecheckExpr :: Context -> Expr -> Either String Type
 typecheckExpr ctx expr = case expr of
-    UnitLit -> Right NgUnit
-    IntLit _ -> Right NgInt
-    StringLit _ -> Right NgString
+    UnitL -> Right UnitT
+    IntL _ -> Right IntT
+    StringL _ -> Right StringT
 
     Do doExpr cont ->
         pure doExpr >>= typecheckExpr ctx >> pure cont >>= typecheckExpr ctx
@@ -49,7 +49,7 @@ typecheckExpr ctx expr = case expr of
     Lambda params body -> do
         let newCtx = foldl (\acc (name, paramType) -> Map.insert name paramType acc) ctx params
         exprType <- typecheckExpr newCtx body
-        let lambdaType = NgFunction (map snd params) exprType
+        let lambdaType = FunctionT (map snd params) exprType
         Right lambdaType
 
     Get name -> maybe (Left $ name ++ " is undefined") Right $ Map.lookup name ctx
@@ -58,7 +58,7 @@ typecheckExpr ctx expr = case expr of
         calleeType <- typecheckExpr ctx callee
         paramTypes <- sequence $ map (typecheckExpr ctx) params
         case calleeType of
-            NgFunction calleeParamTypes _ ->
+            FunctionT calleeParamTypes _ ->
                 if paramTypes /= calleeParamTypes
                 then Left "Call type error"
                 else Right calleeType

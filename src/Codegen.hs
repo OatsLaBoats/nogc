@@ -8,6 +8,9 @@ import Debug.Trace
 
 import qualified Ir
 
+-- TODO: Use the 'restrict' keyword for optimization purposes
+--       https://en.cppreference.com/w/c/language/restrict.html
+
 ng_entryPoint = "ng_main"
 ng_String = "struct ng_String"
 ng_Int = "ng_Int"
@@ -26,6 +29,7 @@ data Output = Output
     , getInitializers :: [String]
     , getFunctions :: [String]
     , getDeclarations :: [String]
+    , getStructs :: [String]
     }
 
 addGlobal :: String -> Output -> Output
@@ -38,19 +42,20 @@ addDeclaration :: String -> Output -> Output
 addDeclaration declaration output = output { getDeclarations = declaration : (getDeclarations output) }
 
 generateC :: Output -> String
-generateC output = includes ++ "\n" ++ globals ++ "\n" ++ declarations ++ "\n" ++ functions ++ "\n" ++ mainFunction
+generateC output = includes ++ "\n" ++ structs ++ "\n" ++ globals ++ "\n" ++ declarations ++ "\n" ++ functions ++ "\n" ++ mainFunction
     where
         includes = concat $ map (\x -> "#include \"" ++ x ++ "\"\n") (getIncludes output)
         globals = concat $ map (++"\n") (getGlobals output)
         declarations = concat $ map (++"\n") (getDeclarations output)
         functions = concat $ map (++"\n") (getFunctions output)
+        structs = concat $ map (++"\n") (getStructs output)
         mainFunction = "int main(void){ng_main();return 0;}"
 
 generateOutput :: [Ir.Construct] -> Output
-generateOutput ir = foldl pred output ir
+generateOutput ir = foldl predicate output ir
     where
-        pred acc construct = case construct of
-            Ir.Static name _ expr -> case expr of
+        predicate acc construct = case construct of
+            Ir.Constant name _ expr -> case expr of
                 Ir.StringL s ->
                     addGlobal ("static const " ++ ng_String ++ " " ++ name ++ "=" ++ generateStringL s ++ ";") acc
                 Ir.IntL n ->
@@ -67,9 +72,10 @@ generateOutput ir = foldl pred output ir
 
         context = foldl
             (\acc c -> case c of
-                Ir.Static name t _ -> Map.insert name t acc
+                Ir.Constant name t _ -> Map.insert name t acc
                 Ir.Function name params rt _ -> Map.insert name (Ir.FunctionT (map snd params) rt) acc
-                Ir.Extern name t -> Map.insert name t acc)
+                Ir.Extern name t -> Map.insert name t acc
+                Ir.Lambda id' params rt _ -> undefined)
             Map.empty
             ir
 
@@ -79,7 +85,14 @@ generateOutput ir = foldl pred output ir
             , getInitializers = []
             , getFunctions = []
             , getDeclarations = []
+            , getStructs = []
             }
+
+lambdaName :: Ir.Id -> String
+lambdaName id' = "lambda_" ++ show id'
+
+closureName :: Ir.Id -> String
+closureName id' = "closure_" ++ show id'
 
 generateFunctionSignature :: Ir.Identifier -> [(Ir.Identifier, Ir.Type)] -> Ir.Type -> String
 generateFunctionSignature name params returnType =
@@ -94,6 +107,8 @@ generateFunctionSignature name params returnType =
                 acc ++
                 (if null acc then "" else ",") ++ (typeToString t) ++ " " ++ n)
                 "" params
+
+-- TODO: Put context at the end
 
 generateFunctionBody :: Context -> Ir.Expr -> Ir.Type -> String
 generateFunctionBody ctx expr returnType =
@@ -176,7 +191,7 @@ generateExpr ctx@(Context locals varIndex) expr = case expr of
         in
 
         -- This is unreadable.
-        let (params', paramSrc, ctx'@(Context locals' varIndex')) = foldl (\(acc, src, ctx1) e ->
+        let (params', paramSrc, ctx') = foldl (\(acc, src, ctx1) e ->
                 let (src', res', _, ctx2) = generateExpr ctx1 e 
                 in (acc ++ [res'], src ++ src', ctx2))
                 ([], "", ctx) params
