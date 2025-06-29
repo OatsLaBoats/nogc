@@ -75,7 +75,7 @@ generateOutput ir = foldl predicate output ir
                 Ir.Constant name t _ -> Map.insert name t acc
                 Ir.Function name params rt _ -> Map.insert name (Ir.FunctionT (map snd params) rt) acc
                 Ir.Extern name t -> Map.insert name t acc
-                Ir.Lambda id' params rt _ -> undefined)
+                Ir.Lambda id' params rt _ _ -> undefined)
             Map.empty
             ir
 

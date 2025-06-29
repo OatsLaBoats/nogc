@@ -7,7 +7,9 @@
 #include <assert.h>
 #include <stdbool.h>
 
-#define PTR(T) const T * const
+#define CONST_PTR(T) const T * const restrict
+#define PTR(T) T * restrict
+
 #define  ng_Unit void
 
 typedef int64_t ng_Int;
@@ -16,14 +18,14 @@ typedef bool ng_Bool;
 struct ng_String {
     size_t cap;
     size_t len;
-    char* mem;
+    PTR(char) mem;
 };
 
 // I probably won't implement this but in a full featured language when we need borrowed string we can just pass a slice and save a bit on stack memory
 // This also makes it faster if we have small string optimization since we don't need to check if the starting byte is set! when we clone we don't need the capacity anyways.
 struct ng_StringSlice {
     size_t len;
-    const char *mem;
+    CONST_PTR(char) *mem;
 };
 
 static inline struct ng_StringSlice ng_sliceString(const struct ng_String str);

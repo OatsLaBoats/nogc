@@ -46,7 +46,7 @@ typecheckExpr ctx expr = case expr of
             then Left "Let type error"
             else typecheckExpr newCtx cont
 
-    Lambda params body -> do
+    Lambda params _ body -> do
         let newCtx = foldl (\acc (name, paramType) -> Map.insert name paramType acc) ctx params
         exprType <- typecheckExpr newCtx body
         let lambdaType = FunctionT (map snd params) exprType

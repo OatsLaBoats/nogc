@@ -3,7 +3,7 @@ module Main where
 import System.Exit
 
 import Ast
-import qualified Ir
+import qualified Ir (generateIr)
 import qualified Codegen as C
 import qualified Typecheck as T
 
@@ -15,20 +15,23 @@ main = do
         Just msg -> putStrLn msg >> exitFailure
         Nothing -> pure ()
 
-    let output = C.generateOutput Ir.myCompiledIr
+    let ir = Ir.generateIr code
+    putStrLn $ show ir
+
+    let output = C.generateOutput ir
     let cSource = C.generateC output
     writeFile "output.c" cSource
 
 library :: [Binding]
 library
-    = Extern "ng_printLn" (FunctionT [StringT] UnitT)
-    : Extern "ng_addInt" (FunctionT [OwnedT IntT, OwnedT IntT] IntT)
+    = Extern "ng_printLn" (FunctionT [StringT] (OwnedT UnitT))
+    : Extern "ng_addInt" (FunctionT [OwnedT IntT, IntT] (OwnedT IntT))
     : []
 
 program :: [Binding]
 program
     = Binding "anInt" IntT (IntL 10)
     : Binding "aString" StringT (StringL "Hello World")
-    : Binding "main" (FunctionT [] UnitT) (Lambda [] 
-        (Do (Call (Get "printLn") [Get "aString"]) UnitL))
+    : Binding "main" (FunctionT [] UnitT) (Lambda [] UnitT 
+        (Do (Call (Get "ng_printLn") [Get "aString"]) UnitL))
     : []

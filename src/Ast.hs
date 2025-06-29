@@ -28,6 +28,8 @@ data Expr
     | StringL String
     | Let Name Type Expr Expr
     | Do Expr Expr
-    | Lambda [(Name, Type)] Expr -- Params Ret-type Expr
+
+    -- TODO: Weird design but whatever
+    | Lambda [(Name, Type)] Type Expr -- Params Ret-type Expr
     | Get Name
     | Call Expr [Expr] -- Runs a lambda expression
