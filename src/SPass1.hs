@@ -5,6 +5,8 @@ module SPass1 (runSPass1) where
 -- 2. Converts every subsequent chain that uses it to a borrow
 -- 3. Removes most cloning ops
 
+-- TODO: Im bad at hakell... Maybe the State ir Reader monad can make some of this cleaner?
+
 import Data.Maybe
 import Data.Map (Map)
 import qualified Data.Map as Map
@@ -31,8 +33,17 @@ addFunctionBeingAnalyzed name ctx = ctx { getFunctionBeingAnalyzedSet = Set.inse
 removeFunctionBeingAnalyzed :: Ir.Identifier -> Context -> Context
 removeFunctionBeingAnalyzed name ctx = ctx { getFunctionBeingAnalyzedSet = Set.delete name $ getFunctionBeingAnalyzedSet ctx }
 
+addFunction :: Ir.Identifier -> Ir.Type -> Context -> Context
+addFunction name type' ctx = ctx { getFunctionMap = Map.insert name type' $ getFunctionMap ctx }
+
+getFunction :: Ir.Identifier -> Context -> Ir.Type
+getFunction name ctx = fromJust $ Map.lookup name $ getFunctionMap ctx
+
 getFunctionData :: Ir.Identifier -> Context -> Ir.Construct
 getFunctionData name ctx = fromJust $ Map.lookup name $ getFunctionDataMap ctx
+
+addFunctionData :: Ir.Identifier -> Ir.Construct -> Context -> Context
+addFunctionData name construct ctx = ctx { getFunctionDataMap = Map.insert name construct $ getFunctionDataMap ctx }
 
 isFunctionAnalyzed :: Ir.Identifier -> Context -> Bool
 isFunctionAnalyzed name ctx = Set.member name $ getFunctionAnalyzedSet ctx
@@ -44,7 +55,7 @@ addConstruct :: Ir.Construct -> Context -> Context
 addConstruct construct ctx = ctx { getIr = (construct : getIr ctx) }
 
 runSPass1 :: [Ir.Construct] -> [Ir.Construct]
-runSPass1 ir = reverse $ getIr $ foldl (flip constructPass1) context ir
+runSPass1 ir = getIr $ foldl (flip constructPass1) context ir
     where
         context = Context
             { getFunctionMap = functionMap
@@ -53,7 +64,7 @@ runSPass1 ir = reverse $ getIr $ foldl (flip constructPass1) context ir
             , getFunctionDataMap = functionDataMap
 
             , getConstMap = constMap
-            , getIr = ir
+            , getIr = []
             }
 
         functionDataMap = foldl
@@ -98,12 +109,19 @@ analyzeFunctionParams construct ctx =
                     (ctx4, newParams2 ++ [(name', if owned then Ir.OwnedT type' else Ir.BorrowedT Ir.Foreign type')])) 
                 (ctx1, []) params
     in
+
+    let newConstruct = (Ir.Function name newParams1 retType expr) in
+    let newFunctionType = Ir.FunctionT (map snd newParams1) retType in
+
     let ctx3 = removeFunctionBeingAnalyzed name ctx2 in
     let ctx4 = addFunctionAnalyzed name ctx3 in
-    addConstruct (Ir.Function name newParams1 retType expr) ctx4
+    let ctx5 = addFunctionData name newConstruct ctx4 in
+    let ctx6 = addFunction name newFunctionType ctx5 in
+
+    addConstruct (Ir.Function name newParams1 retType expr) ctx6
     where
         (name, params, retType, expr) = case construct of
-            Ir.Function name params retType expr -> (name, params, retType, expr)
+            Ir.Function name' params' retType' expr' -> (name', params', retType', expr')
             _ -> undefined
 
 isBindingOwned :: Ir.Identifier -> Ir.Expr -> Context -> (Context, Bool)

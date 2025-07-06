@@ -12,6 +12,7 @@ module Ir
     , isUnit
     , isLifetimeLocal
     , functionConstructToType
+    , prettyShowIr
     )
     where
 
@@ -24,6 +25,9 @@ import Data.Map (Map)
 -- Maybe we should be more specific with borrow and mutate and add more intrinsics
 -- The IR can be designed to have multiple stages. For example we can include pointers even if
 -- they are only used to optimize the output code and not useful for static analyis.
+
+prettyShowIr :: [Construct] -> String
+prettyShowIr constructs = unlines $ map show constructs
 
 -- The context required for the translation of the AST to the IR 
 data Context = Context
