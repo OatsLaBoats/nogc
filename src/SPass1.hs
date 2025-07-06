@@ -22,6 +22,9 @@ data Context = Context
     , getIr :: [Ir.Construct]
     }
 
+addFunctionAnalyzed :: Ir.Identifier -> Context -> Context
+addFunctionAnalyzed name ctx = ctx { getFunctionAnalyzedSet = Set.insert name $ getFunctionAnalyzedSet ctx }
+
 addFunctionBeingAnalyzed :: Ir.Identifier -> Context -> Context
 addFunctionBeingAnalyzed name ctx = ctx { getFunctionBeingAnalyzedSet = Set.insert name $ getFunctionBeingAnalyzedSet ctx }
 
@@ -87,25 +90,27 @@ constructPass1 construct ctx = case construct of
 analyzeFunctionParams :: Ir.Construct -> Context -> Context
 analyzeFunctionParams construct ctx =
     if isFunctionAnalyzed name ctx then ctx else
-    let ctx' = addFunctionBeingAnalyzed name ctx in
-    let newParams = 
-            map (\(name', type') -> -- TODO: We need to swap to fold since we are now dealing with state
-                let (ctx1, owned) = isBindingOwned name expr ctx' in
-                if owned
-                then (name, Ir.OwnedT type')
-                else (name, Ir.BorrowedT (Ir.Foreign 1) type') -- TODO: Figure out lifetimes cause this won't work
-            )
-    in undefined
+    let ctx1 = addFunctionBeingAnalyzed name ctx in
+    let (ctx2, newParams1) = 
+            foldl 
+                (\(ctx3, newParams2) (name', type') -> -- TODO: We need to swap to fold since we are now dealing with state
+                    let (ctx4, owned) = isBindingOwned name' expr ctx3 in
+                    (ctx4, newParams2 ++ [(name', if owned then Ir.OwnedT type' else Ir.BorrowedT Ir.Foreign type')])) 
+                (ctx1, []) params
+    in
+    let ctx3 = removeFunctionBeingAnalyzed name ctx2 in
+    let ctx4 = addFunctionAnalyzed name ctx3 in
+    addConstruct (Ir.Function name newParams1 retType expr) ctx4
     where
         (name, params, retType, expr) = case construct of
             Ir.Function name params retType expr -> (name, params, retType, expr)
             _ -> undefined
 
--- TODO: Need to handle recursion
 isBindingOwned :: Ir.Identifier -> Ir.Expr -> Context -> (Context, Bool)
 isBindingOwned name expr ctx = case expr of
     Ir.Run callee params ->
-        --if isFunctionBeingAnalyzed callee ctx then
+        -- Should handle the recursion
+        if isFunctionBeingAnalyzed callee ctx then (ctx, False) else
 
         let ctx' = if isFunctionAnalyzed callee ctx then ctx else
                 let construct = getFunctionData callee ctx in

@@ -10,8 +10,6 @@ module Ir
     , MemType(..)
     , generateIr
     , isUnit
-    , passLifetime
-    , returnLifetime
     , isLifetimeLocal
     , functionConstructToType
     )
@@ -83,21 +81,9 @@ data Type
 
 data Lifetime
     = Global -- For global values, can be returned
-    | Foreign Int -- For borrows that come from the parameters, can be returned but has to decay to a local eventually when the counter reaches 0
+    | Foreign -- For function parameters, removed the int since it depends on the context
     | Local -- For borrows in of values in the function scope, can't be returned
     deriving Show
-
-passLifetime :: Lifetime -> Lifetime
-passLifetime lt = case lt of
-    Global -> lt
-    Foreign n -> Foreign (n + 1)
-    Local -> Foreign 1
-
-returnLifetime :: Lifetime -> Lifetime
-returnLifetime lt = case lt of
-    Global -> lt
-    Foreign n -> if n > 1 then Foreign (n - 1) else Local
-    Local -> error "Can't return local lifetimes from function"
 
 isLifetimeLocal :: Lifetime -> Bool
 isLifetimeLocal lt = case lt of
@@ -165,8 +151,9 @@ generateIr = getConstructs . foldl predicate context
 
         predicate acc b = case b of
             Ast.Extern name type' ->
-                addFunction name (astTypeToIrType type') acc &
-                addConstruct (Extern name (astTypeToIrType type'))
+                let exType = astTypeToIrTypeEx False type' in
+                addFunction name exType acc &
+                addConstruct (Extern name exType)
             Ast.Binding name type' expr -> generateBinding name type' expr acc
 
 generateBinding :: Ast.Name -> Ast.Type -> Ast.Expr -> Context -> Context
@@ -252,6 +239,16 @@ astTypeToIrType type' = case type' of
     Ast.StringT -> StringT
     Ast.FunctionT params retType -> FunctionT (map astTypeToIrType params) (astTypeToIrType retType)
     Ast.OwnedT innerType -> OwnedT $ astTypeToIrType innerType
+
+astTypeToIrTypeEx :: Bool -> Ast.Type -> Type
+astTypeToIrTypeEx isParam type' = case type' of
+    Ast.UnitT -> BorrowedT lifetime UnitT
+    Ast.IntT -> BorrowedT lifetime IntT
+    Ast.StringT -> BorrowedT lifetime StringT
+    Ast.FunctionT params retType -> FunctionT (map (astTypeToIrTypeEx True) params) (astTypeToIrTypeEx False retType)
+    Ast.OwnedT innerType -> OwnedT $ astTypeToIrType innerType
+    where
+        lifetime = if isParam then Foreign else Global
 
 isUnit :: Type -> Bool
 isUnit UnitT = True

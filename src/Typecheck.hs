@@ -22,12 +22,12 @@ typecheck bindings = loop bindings
 
 typecheckBinding :: Context -> Binding -> Maybe String
 typecheckBinding _ (Extern _ _) = Nothing
-typecheckBinding ctx (Binding _ btype expr) = 
+typecheckBinding ctx (Binding name btype expr) = 
     case typecheckExpr ctx expr of
         Left msg -> Just msg
         Right exprType ->
-            if btype /= exprType
-            then Just "Binding type error"
+            if not $ compareType btype exprType
+            then Just ("Binding type error at: " ++ name)
             else Nothing
 
 typecheckExpr :: Context -> Expr -> Either String Type
@@ -46,11 +46,14 @@ typecheckExpr ctx expr = case expr of
             then Left "Let type error"
             else typecheckExpr newCtx cont
 
-    Lambda params _ body -> do
+    Lambda params retType body -> do
         let newCtx = foldl (\acc (name, paramType) -> Map.insert name paramType acc) ctx params
         exprType <- typecheckExpr newCtx body
         let lambdaType = FunctionT (map snd params) exprType
-        Right lambdaType
+
+        if not $ compareType exprType retType 
+            then Left "Mismatched lambda return type with expr type"
+            else Right lambdaType
 
     Get name -> maybe (Left $ name ++ " is undefined") Right $ Map.lookup name ctx
 
@@ -58,8 +61,8 @@ typecheckExpr ctx expr = case expr of
         calleeType <- typecheckExpr ctx callee
         paramTypes <- sequence $ map (typecheckExpr ctx) params
         case calleeType of
-            FunctionT calleeParamTypes _ ->
-                if paramTypes /= calleeParamTypes
+            FunctionT calleeParamTypes retType ->
+                if not $ compareTypeList paramTypes calleeParamTypes
                 then Left "Call type error"
-                else Right calleeType
+                else Right retType
             _ -> Left "Can only call lambdas"

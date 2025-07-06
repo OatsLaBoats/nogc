@@ -3,7 +3,8 @@ module Main where
 import System.Exit
 
 import Ast
-import qualified Ir (generateIr)
+import qualified Ir
+import qualified SPass1
 import qualified Codegen as C
 import qualified Typecheck as T
 
@@ -16,7 +17,8 @@ main = do
         Nothing -> pure ()
 
     let ir = Ir.generateIr code
-    putStrLn $ show ir
+    let ir1 = SPass1.runSPass1 ir
+    putStrLn $ show ir1
 
     let output = C.generateOutput ir
     let cSource = C.generateC output
@@ -32,6 +34,12 @@ program :: [Binding]
 program
     = Binding "anInt" IntT (IntL 10)
     : Binding "aString" StringT (StringL "Hello World")
+
+    : Binding "myAdd" (FunctionT [IntT, IntT] IntT)
+        (Lambda [("x", IntT), ("y", IntT)] IntT 
+            (Call (Get "ng_addInt") [Get "x", Get "y"]))
+
     : Binding "main" (FunctionT [] UnitT) (Lambda [] UnitT 
         (Do (Call (Get "ng_printLn") [Get "aString"]) UnitL))
+
     : []
