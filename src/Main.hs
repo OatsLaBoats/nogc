@@ -4,7 +4,7 @@ import System.Exit
 
 import Ast
 import qualified Ir
-import qualified SPass1
+import qualified BorrowPass
 import qualified Codegen as C
 import qualified Typecheck as T
 
@@ -19,7 +19,7 @@ main = do
         Nothing -> pure ()
 
     let ir = Ir.generateIr code
-    let ir1 = SPass1.runSPass1 ir
+    let ir1 = BorrowPass.runBorrowPass ir
     putStrLn $ Ir.prettyShowIr ir1
 
     let output = C.generateOutput ir
@@ -36,6 +36,10 @@ program :: [Binding]
 program
     = Binding "anInt" IntT (IntL 10)
     : Binding "aString" StringT (StringL "Hello World")
+
+    : Binding "myAdd1" (FunctionT [IntT, IntT] IntT)
+        (Lambda [("x", IntT), ("y", IntT)] IntT 
+            (Call (Get "myAdd") [Get "x", Get "y"]))
 
     : Binding "myAdd" (FunctionT [IntT, IntT] IntT)
         (Lambda [("x", IntT), ("y", IntT)] IntT 

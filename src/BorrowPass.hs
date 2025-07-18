@@ -1,4 +1,4 @@
-module SPass1 (runSPass1) where
+module BorrowPass (runBorrowPass) where
 
 -- This static pass will convert functions to use borrowing where possible
 -- 1. It converts what it can to using using borrows
@@ -54,8 +54,8 @@ isFunctionBeingAnalyzed name ctx = Set.member name $ getFunctionBeingAnalyzedSet
 addConstruct :: Ir.Construct -> Context -> Context
 addConstruct construct ctx = ctx { getIr = (construct : getIr ctx) }
 
-runSPass1 :: [Ir.Construct] -> [Ir.Construct]
-runSPass1 ir = getIr $ foldl (flip constructPass1) context ir
+runBorrowPass :: [Ir.Construct] -> [Ir.Construct]
+runBorrowPass ir = getIr $ foldl (flip constructPass1) context ir
     where
         context = Context
             { getFunctionMap = functionMap
@@ -137,34 +137,14 @@ isBindingOwned name expr ctx = case expr of
 
         let functionType = fromJust $ Map.lookup callee $ getFunctionMap ctx' in -- TODO: Make a helper for this
         let index = getCloneIndex name params in
-        let type' = getFunctionParamsFromType functionType !! index in
-        (ctx, isOwnedType type')
+        let type' = Ir.getFunctionParamsFromType functionType !! index in
+        (ctx, Ir.isOwnedType type')
 
     Ir.Chain action cont ->
         let (ctx1, owned1) = isBindingOwned name action ctx in
         let (ctx2, owned2) = isBindingOwned name cont ctx1 in
         (if owned1 then ctx1 else ctx2, if owned1 then True else owned2) -- NOTE: Use lazyness to do this and not overdo it
     _ -> (ctx, False)
-
-
--- TODO: Some these should be moved to the Ir file as they are common helpers
-getFunctionParamsFromType :: Ir.Type -> [Ir.Type]
-getFunctionParamsFromType type' = case type' of
-    Ir.FunctionT params _ -> params
-    _ -> undefined
-
-isBorrowedOrOwnedType :: Ir.Type -> Bool
-isBorrowedOrOwnedType type' = isBorrowedType type' || isOwnedType type'
-
-isBorrowedType :: Ir.Type -> Bool
-isBorrowedType type' = case type' of
-    Ir.BorrowedT _ _ -> True
-    _ -> False
-
-isOwnedType :: Ir.Type -> Bool
-isOwnedType type' = case type' of
-    Ir.OwnedT _ -> True
-    _ -> False
 
 getCloneIndex :: Ir.Identifier -> [Ir.Expr] -> Int
 getCloneIndex name params = loop 0 params

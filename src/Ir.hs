@@ -12,14 +12,36 @@ module Ir
     , isUnit
     , isLifetimeLocal
     , functionConstructToType
+    , getFunctionParamsFromType
+    , isBorrowedOrOwnedType
+    , isBorrowedType
+    , isOwnedType
     , prettyShowIr
     )
     where
 
 import qualified Ast
-import Data.Function
 import qualified Data.Map as Map
 import Data.Map (Map)
+import Control.Monad.State
+
+getFunctionParamsFromType :: Ir.Type -> [Ir.Type]
+getFunctionParamsFromType type' = case type' of
+    Ir.FunctionT params _ -> params
+    _ -> undefined
+
+isBorrowedOrOwnedType :: Ir.Type -> Bool
+isBorrowedOrOwnedType type' = isBorrowedType type' || isOwnedType type'
+
+isBorrowedType :: Ir.Type -> Bool
+isBorrowedType type' = case type' of
+    Ir.BorrowedT _ _ -> True
+    _ -> False
+
+isOwnedType :: Ir.Type -> Bool
+isOwnedType type' = case type' of
+    Ir.OwnedT _ -> True
+    _ -> False
 
 -- I think the IR should be rather low level but still support functional abstractions
 -- Maybe we should be more specific with borrow and mutate and add more intrinsics
@@ -36,6 +58,7 @@ data Context = Context
     , getFunctionMap :: Map Identifier Type
     }
 
+-- Utility functions for the context
 incrementLambdaIndex :: Context -> Context
 incrementLambdaIndex context =
     context { getLambdaIndex = getLambdaIndex context + 1 }
@@ -149,92 +172,71 @@ data Expr
     deriving Show
 
 generateIr :: [Ast.Binding] -> [Construct]
-generateIr = getConstructs . foldl predicate context
+generateIr bindings = getConstructs $ execState (generateConstructs bindings) context
     where
         context = Context 0 [] Map.empty
 
-        predicate acc b = case b of
-            Ast.Extern name type' ->
-                let exType = astTypeToIrTypeEx False type' in
-                addFunction name exType acc &
-                addConstruct (Extern name exType)
-            Ast.Binding name type' expr -> generateBinding name type' expr acc
+generateConstructs :: [Ast.Binding] -> State Context ()
+generateConstructs bindings = case bindings of
+    (Ast.Extern name type' : xs) -> do
+        let exType = astTypeToIrTypeEx False type'
+        modify $ addFunction name exType
+        modify $ addConstruct $ Extern name exType
+        generateConstructs xs
 
-generateBinding :: Ast.Name -> Ast.Type -> Ast.Expr -> Context -> Context
-generateBinding name type' expr ctx = case type' of
-    Ast.FunctionT _ retType ->
-        let params = case expr of
-                Ast.Lambda ps _ _ -> map (\(nm, tp) -> (nm, astTypeToIrType tp)) ps
-                _ -> []
-        in
-        let ctx' = addFunction name (astTypeToIrType type') ctx2 in
-        addConstruct (Function name params (astTypeToIrType retType) resExpr2) ctx'
-    _ ->
-        addConstruct (Constant name (astTypeToIrType type') resExpr1) ctx1
+    (Ast.Binding name type' expr : xs) -> case type' of
+        Ast.FunctionT _ retType -> do
+            let (lambdaParams, lambdaExpr) = extractLambda expr
+            let params = map (\(paramName, paramType) -> (paramName, astTypeToIrType paramType)) lambdaParams
+            functionBody <- generateExpr lambdaExpr
+            modify $ addFunction name (astTypeToIrType type')
+            modify $ addConstruct $ Function name params (astTypeToIrType retType) functionBody
+            generateConstructs xs
+        _ -> do
+            resExpr <- generateExpr expr
+            modify $ addConstruct $ Constant name (astTypeToIrType type') resExpr
+            generateConstructs xs
+
+    [] -> pure ()
     where
-        (ctx1, resExpr1) = generateExpr expr ctx
-
-        -- Remove the lambda if we are dealing with a function
-        (ctx2, resExpr2) = case expr of
-            Ast.Lambda _ _ expr' -> generateExpr expr' ctx
+        extractLambda expr = case expr of
+            Ast.Lambda params _ expr' -> (params, expr')
             _ -> undefined
 
-generateExpr :: Ast.Expr -> Context -> (Context, Expr)
-generateExpr expr ctx = case expr of
-    Ast.UnitL -> simple UnitL
-    Ast.IntL n -> simple $ IntL n
-    Ast.StringL s -> simple $ StringL s
-    Ast.Get name -> simple $ Clone name
+generateExpr :: Ast.Expr -> State Context Expr
+generateExpr expr = case expr of
+    Ast.UnitL -> pure UnitL
+    Ast.IntL n -> pure $ IntL n
+    Ast.StringL s -> pure $ StringL s
+    Ast.Get name -> pure $ Clone name
 
-    Ast.Let name type' action cont ->
-        let (ctx1, actionExpr) = generateExpr action ctx in
-        let (ctx2, contExpr) = generateExpr cont ctx1 in
-        (ctx2, Chain (Def name (astTypeToIrType type') actionExpr) contExpr)
+    Ast.Let name type' action cont -> do
+        actionExpr <- generateExpr action
+        contExpr <- generateExpr cont
+        pure $ Chain (Def name (astTypeToIrType type') actionExpr) contExpr
 
-    Ast.Do action cont ->
-        let (ctx1, actionExpr) = generateExpr action ctx in
-        let (ctx2, contExpr) = generateExpr cont ctx1 in
-        (ctx2, Chain actionExpr contExpr)
+    Ast.Do action cont -> do
+        actionExpr <- generateExpr action
+        contExpr <- generateExpr cont
+        pure $ Chain actionExpr contExpr
 
     -- Lets not worry about capturing for now
-    Ast.Lambda params retType lexpr ->
-        let lambdaId = getLambdaIndex ctx in
-        let ctx1 = incrementLambdaIndex ctx in
-        let (ctx2, lambdaExpr) = generateExpr lexpr ctx1 in
-        let lambdaConstruct =
-                Lambda
-                    lambdaId
-                    []
-                    (map (\(name, type') -> (name, astTypeToIrType type')) params)
-                    (astTypeToIrType retType)
-                    lambdaExpr
-        in (addConstruct lambdaConstruct ctx2, Capture lambdaId)
+    Ast.Lambda params retType lexpr -> do
+        ctx <- get
+        let lambdaId = getLambdaIndex ctx
+        modify $ incrementLambdaIndex
+        lambdaExpr <- generateExpr lexpr
+        let lambdaParams = map (\(name, type') -> (name, astTypeToIrType type')) params
+        let lambdaConstruct = Lambda lambdaId [] lambdaParams (astTypeToIrType retType) lambdaExpr
+        modify $ addConstruct lambdaConstruct
+        pure $ Capture lambdaId
 
     -- Needs to check if a function is a lambda or a normal function and run accordingly
-    Ast.Call callExpr params ->
-        let (ctx', params') = 
-                foldr (\p (ctx1, acc) ->
-                    let (ctx2, paramExpr) = generateExpr p ctx1 in
-                    (ctx2, paramExpr : acc))
-                    (ctx, [])
-                    params
-        in
-        if isFunction callExpr then
-            (ctx', Run (getFunctionName callExpr) params')
-        else
-            let (ctx'', lambdaExpr) = generateExpr callExpr ctx' in
-            (ctx'', RunLambda lambdaExpr params')
-
-    where
-        simple e = (ctx, e)
-
-        isFunction callExpr = case callExpr of
-            Ast.Get name -> Map.member name (getFunctionMap ctx)
-            _ -> False
-
-        getFunctionName callExpr = case callExpr of
-            Ast.Get name -> name
-            _ -> undefined
+    -- TODO: Should be a separate pass where we change RunLambda to Run based on if it is a function
+    Ast.Call callExpr params -> do
+        callParams <- mapM generateExpr params
+        lambdaExpr <- generateExpr callExpr
+        pure $ RunLambda lambdaExpr callParams
 
 astTypeToIrType :: Ast.Type -> Type
 astTypeToIrType type' = case type' of
@@ -255,8 +257,9 @@ astTypeToIrTypeEx isParam type' = case type' of
         lifetime = if isParam then Foreign else Global
 
 isUnit :: Type -> Bool
-isUnit UnitT = True
-isUnit _ = False
+isUnit type' = case type' of
+    UnitT -> True
+    _ -> False
 
 -- How does interop with c work when we don't know if the C code takes a reference or an owned value?
 -- I think we have to just pass everything by reference and just ask people to not modify the value...
