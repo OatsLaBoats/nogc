@@ -11,6 +11,8 @@ import qualified Ir
 -- TODO: Use the 'restrict' keyword for optimization purposes
 --       https://en.cppreference.com/w/c/language/restrict.html
 
+-- TODO: Clean this up to use State or Reader
+
 ng_entryPoint = "ng_main"
 ng_String = "struct ng_String"
 ng_Int = "ng_Int"
@@ -44,11 +46,11 @@ addDeclaration declaration output = output { getDeclarations = declaration : (ge
 generateC :: Output -> String
 generateC output = includes ++ "\n" ++ structs ++ "\n" ++ globals ++ "\n" ++ declarations ++ "\n" ++ functions ++ "\n" ++ mainFunction
     where
-        includes = concat $ map (\x -> "#include \"" ++ x ++ "\"\n") (getIncludes output)
-        globals = concat $ map (++"\n") (getGlobals output)
-        declarations = concat $ map (++"\n") (getDeclarations output)
-        functions = concat $ map (++"\n") (getFunctions output)
-        structs = concat $ map (++"\n") (getStructs output)
+        includes = concatMap (\x -> "#include \"" ++ x ++ "\"\n") (getIncludes output)
+        globals = unlines $ getGlobals output
+        declarations = unlines $ getDeclarations output
+        functions = unlines $ getFunctions output
+        structs = unlines $ getStructs output
         mainFunction = "int main(void){ng_main();return 0;}"
 
 generateOutput :: [Ir.Construct] -> Output
@@ -117,9 +119,11 @@ generateFunctionBody ctx expr returnType =
         Ir.UnitT -> "{\n" ++ src ++ "}\n"
         _ -> "{\n" ++ src ++ "return " ++ res ++ ";\n" ++ "}\n"
 
-type ExprResult = String
-type SourceCode = String
-type VarId = Int
+data ExprOutput = ExprOutput
+    { getResult :: String
+    , getCode :: String
+    , getType :: Ir.Type
+    }
 
 -- All expression results are stored in a temporary variable before being used.
 -- This bypasses the limitations of C and the compiler optimizes it all away anyway.

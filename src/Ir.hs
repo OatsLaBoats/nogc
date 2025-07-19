@@ -17,6 +17,7 @@ module Ir
     , isBorrowedType
     , isOwnedType
     , prettyShowIr
+    , isFunction
     )
     where
 
@@ -25,15 +26,20 @@ import qualified Data.Map as Map
 import Data.Map (Map)
 import Control.Monad.State
 
-getFunctionParamsFromType :: Ir.Type -> [Ir.Type]
+isFunction :: Construct -> Bool
+isFunction construct = case construct of
+    Function _ _ _ _ -> True
+    _ -> False
+
+getFunctionParamsFromType :: Type -> [Type]
 getFunctionParamsFromType type' = case type' of
     Ir.FunctionT params _ -> params
     _ -> undefined
 
-isBorrowedOrOwnedType :: Ir.Type -> Bool
+isBorrowedOrOwnedType :: Type -> Bool
 isBorrowedOrOwnedType type' = isBorrowedType type' || isOwnedType type'
 
-isBorrowedType :: Ir.Type -> Bool
+isBorrowedType :: Type -> Bool
 isBorrowedType type' = case type' of
     Ir.BorrowedT _ _ -> True
     _ -> False
@@ -222,8 +228,7 @@ generateExpr expr = case expr of
 
     -- Lets not worry about capturing for now
     Ast.Lambda params retType lexpr -> do
-        ctx <- get
-        let lambdaId = getLambdaIndex ctx
+        lambdaId <- gets getLambdaIndex
         modify $ incrementLambdaIndex
         lambdaExpr <- generateExpr lexpr
         let lambdaParams = map (\(name, type') -> (name, astTypeToIrType type')) params

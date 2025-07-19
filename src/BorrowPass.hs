@@ -1,3 +1,5 @@
+{-# LANGUAGE NondecreasingIndentation #-}
+
 module BorrowPass (runBorrowPass) where
 
 -- This static pass will convert functions to use borrowing where possible
@@ -5,14 +7,14 @@ module BorrowPass (runBorrowPass) where
 -- 2. Converts every subsequent chain that uses it to a borrow
 -- 3. Removes most cloning ops
 
--- TODO: Im bad at hakell... Maybe the State ir Reader monad can make some of this cleaner?
-
 import Data.Maybe
 import Data.Map (Map)
 import qualified Data.Map as Map
 import Data.Set (Set)
 import qualified Data.Set as Set
 import qualified Ir
+import Control.Monad.State
+import Control.Monad
 
 data Context = Context
     { getFunctionMap :: Map Ir.Identifier Ir.Type
@@ -55,7 +57,7 @@ addConstruct :: Ir.Construct -> Context -> Context
 addConstruct construct ctx = ctx { getIr = (construct : getIr ctx) }
 
 runBorrowPass :: [Ir.Construct] -> [Ir.Construct]
-runBorrowPass ir = getIr $ foldl (flip constructPass1) context ir
+runBorrowPass ir = getIr $ execState (constructPass1 ir) context
     where
         context = Context
             { getFunctionMap = functionMap
@@ -93,63 +95,65 @@ runBorrowPass ir = getIr $ foldl (flip constructPass1) context ir
             Map.empty ir
 
 -- In pass 1 we convert all the function parameters to be owned or borrowed
-constructPass1 :: Ir.Construct -> Context -> Context
-constructPass1 construct ctx = case construct of
-    Ir.Function _ _ _ _ -> analyzeFunctionParams construct ctx
-    _ -> addConstruct construct ctx
+constructPass1 :: [Ir.Construct] -> State Context ()
+constructPass1 ir = case ir of
+    (c : cs) -> do
+        if Ir.isFunction c then analyzeFunctionParams c else modify $ addConstruct c
+        constructPass1 cs
+    _ -> pure ()
 
-analyzeFunctionParams :: Ir.Construct -> Context -> Context
-analyzeFunctionParams construct ctx =
-    if isFunctionAnalyzed name ctx then ctx else
-    let ctx1 = addFunctionBeingAnalyzed name ctx in
-    let (ctx2, newParams1) = 
-            foldl 
-                (\(ctx3, newParams2) (name', type') -> -- TODO: We need to swap to fold since we are now dealing with state
-                    let (ctx4, owned) = isBindingOwned name' expr ctx3 in
-                    (ctx4, newParams2 ++ [(name', if owned then Ir.OwnedT type' else Ir.BorrowedT Ir.Foreign type')])) 
-                (ctx1, []) params
-    in
+analyzeFunctionParams :: Ir.Construct -> State Context ()
+analyzeFunctionParams construct = do
+    fnAnalyzed <- gets $ isFunctionAnalyzed name
+    if fnAnalyzed then pure () else do
 
-    let newConstruct = (Ir.Function name newParams1 retType expr) in
-    let newFunctionType = Ir.FunctionT (map snd newParams1) retType in
+    modify $ addFunctionBeingAnalyzed name
+    newParams <- mapM paramPred params
+    let newConstruct = Ir.Function name newParams retType expr
 
-    let ctx3 = removeFunctionBeingAnalyzed name ctx2 in
-    let ctx4 = addFunctionAnalyzed name ctx3 in
-    let ctx5 = addFunctionData name newConstruct ctx4 in
-    let ctx6 = addFunction name newFunctionType ctx5 in
-
-    addConstruct (Ir.Function name newParams1 retType expr) ctx6
+    modify $ removeFunctionBeingAnalyzed name
+    modify $ addFunctionAnalyzed name
+    modify $ addFunctionData name newConstruct
+    modify $ addFunction name $ Ir.FunctionT (map snd newParams) retType
+    modify $ addConstruct newConstruct
     where
+        paramPred :: (Ir.Identifier, Ir.Type) -> State Context (Ir.Identifier, Ir.Type)
+        paramPred (name', type') = do
+            owned <- isBindingOwned name' expr
+            pure (name', if owned then Ir.OwnedT type' else Ir.BorrowedT Ir.Foreign type')
+
         (name, params, retType, expr) = case construct of
             Ir.Function name' params' retType' expr' -> (name', params', retType', expr')
             _ -> undefined
 
-isBindingOwned :: Ir.Identifier -> Ir.Expr -> Context -> (Context, Bool)
-isBindingOwned name expr ctx = case expr of
-    Ir.Run callee params ->
-        -- Should handle the recursion
-        if isFunctionBeingAnalyzed callee ctx then (ctx, False) else
+isBindingOwned :: Ir.Identifier -> Ir.Expr -> State Context Bool
+isBindingOwned name expr = case expr of
+    Ir.Run callee params -> do
+        fnBeingAnalyzed <- gets $ isFunctionBeingAnalyzed callee
+        if fnBeingAnalyzed then pure False else do
 
-        let ctx' = if isFunctionAnalyzed callee ctx then ctx else
-                let construct = getFunctionData callee ctx in
-                analyzeFunctionParams construct ctx
-        in
+        fnAnalyzed <- gets $ isFunctionAnalyzed callee
+        unless fnAnalyzed $ do
+            construct <- gets $ getFunctionData callee
+            analyzeFunctionParams construct
+        
+        
+        functionType <- gets $ getFunction callee
+        let index = getCloneIndex name params
+        let type' = Ir.getFunctionParamsFromType functionType !! index
+        pure $ Ir.isOwnedType type'
 
-        let functionType = fromJust $ Map.lookup callee $ getFunctionMap ctx' in -- TODO: Make a helper for this
-        let index = getCloneIndex name params in
-        let type' = Ir.getFunctionParamsFromType functionType !! index in
-        (ctx, Ir.isOwnedType type')
+    Ir.Chain action cont -> do
+        owned1 <- isBindingOwned name action
+        owned2 <- isBindingOwned name cont
+        pure $ owned1 || owned2
 
-    Ir.Chain action cont ->
-        let (ctx1, owned1) = isBindingOwned name action ctx in
-        let (ctx2, owned2) = isBindingOwned name cont ctx1 in
-        (if owned1 then ctx1 else ctx2, if owned1 then True else owned2) -- NOTE: Use lazyness to do this and not overdo it
-    _ -> (ctx, False)
+    _ -> pure False
 
 getCloneIndex :: Ir.Identifier -> [Ir.Expr] -> Int
 getCloneIndex name params = loop 0 params
     where
-        loop index params = case params of
+        loop index params' = case params' of
             ((Ir.Clone name') : xs) -> if name == name' then index else loop (index + 1) xs
             (_ : xs) -> loop (index + 1) xs
             _ -> undefined
