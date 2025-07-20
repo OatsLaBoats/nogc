@@ -54,7 +54,7 @@ isFunctionBeingAnalyzed :: Ir.Identifier -> Context -> Bool
 isFunctionBeingAnalyzed name ctx = Set.member name $ getFunctionBeingAnalyzedSet ctx
 
 addConstruct :: Ir.Construct -> Context -> Context
-addConstruct construct ctx = ctx { getIr = (construct : getIr ctx) }
+addConstruct construct ctx = ctx { getIr = construct : getIr ctx }
 
 runBorrowPass :: [Ir.Construct] -> [Ir.Construct]
 runBorrowPass ir = getIr $ execState (constructPass1 ir) context
@@ -140,7 +140,7 @@ isBindingOwned name expr = case expr of
         
         functionType <- gets $ getFunction callee
         let index = getCloneIndex name params
-        let type' = Ir.getFunctionParamsFromType functionType !! index
+        let type' = Ir.getFunctionParamsType functionType !! index
         pure $ Ir.isOwnedType type'
 
     Ir.Chain action cont -> do
@@ -151,9 +151,9 @@ isBindingOwned name expr = case expr of
     _ -> pure False
 
 getCloneIndex :: Ir.Identifier -> [Ir.Expr] -> Int
-getCloneIndex name params = loop 0 params
+getCloneIndex name = loop 0
     where
-        loop index params' = case params' of
+        loop index params = case params of
             ((Ir.Clone name') : xs) -> if name == name' then index else loop (index + 1) xs
             (_ : xs) -> loop (index + 1) xs
             _ -> undefined

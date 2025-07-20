@@ -12,12 +12,13 @@ module Ir
     , isUnit
     , isLifetimeLocal
     , functionConstructToType
-    , getFunctionParamsFromType
+    , getFunctionParamsType
     , isBorrowedOrOwnedType
     , isBorrowedType
     , isOwnedType
     , prettyShowIr
     , isFunction
+    , getFunctionReturnType
     )
     where
 
@@ -25,14 +26,20 @@ import qualified Ast
 import qualified Data.Map as Map
 import Data.Map (Map)
 import Control.Monad.State
+import Data.Bifunctor
 
 isFunction :: Construct -> Bool
 isFunction construct = case construct of
-    Function _ _ _ _ -> True
+    Function {} -> True
     _ -> False
 
-getFunctionParamsFromType :: Type -> [Type]
-getFunctionParamsFromType type' = case type' of
+getFunctionReturnType :: Type -> Type
+getFunctionReturnType type' = case type' of
+    Ir.FunctionT _ rt -> rt
+    _ -> undefined
+
+getFunctionParamsType :: Type -> [Type]
+getFunctionParamsType type' = case type' of
     Ir.FunctionT params _ -> params
     _ -> undefined
 
@@ -193,7 +200,7 @@ generateConstructs bindings = case bindings of
     (Ast.Binding name type' expr : xs) -> case type' of
         Ast.FunctionT _ retType -> do
             let (lambdaParams, lambdaExpr) = extractLambda expr
-            let params = map (\(paramName, paramType) -> (paramName, astTypeToIrType paramType)) lambdaParams
+            let params = map (second astTypeToIrType) lambdaParams
             functionBody <- generateExpr lambdaExpr
             modify $ addFunction name (astTypeToIrType type')
             modify $ addConstruct $ Function name params (astTypeToIrType retType) functionBody
@@ -231,7 +238,7 @@ generateExpr expr = case expr of
         lambdaId <- gets getLambdaIndex
         modify $ incrementLambdaIndex
         lambdaExpr <- generateExpr lexpr
-        let lambdaParams = map (\(name, type') -> (name, astTypeToIrType type')) params
+        let lambdaParams = map (second astTypeToIrType) params
         let lambdaConstruct = Lambda lambdaId [] lambdaParams (astTypeToIrType retType) lambdaExpr
         modify $ addConstruct lambdaConstruct
         pure $ Capture lambdaId

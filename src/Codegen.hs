@@ -1,3 +1,6 @@
+
+{-# LANGUAGE NondecreasingIndentation #-}
+
 module Codegen where
 
 import Data.Function
@@ -5,8 +8,8 @@ import Data.Maybe
 import qualified Data.Map as Map
 import Data.Map (Map)
 import Debug.Trace
-
 import qualified Ir
+import Control.Monad.State
 
 -- TODO: Use the 'restrict' keyword for optimization purposes
 --       https://en.cppreference.com/w/c/language/restrict.html
@@ -24,6 +27,12 @@ data Context = Context
     { getLocals :: Map Ir.Identifier Ir.Type
     , getVarIndex :: Int
     }
+
+getLocalType :: Ir.Identifier -> Context -> Ir.Type
+getLocalType name ctx = fromJust $ Map.lookup name $ getLocals ctx
+
+addLocal :: Ir.Identifier -> Ir.Type -> Context -> Context
+addLocal name type' ctx = ctx { getLocals = Map.insert name type' (getLocals ctx) }
 
 data Output = Output
     { getIncludes :: [String]
@@ -64,11 +73,11 @@ generateOutput ir = foldl predicate output ir
                     addGlobal ("static const " ++ ng_Int ++ " " ++ name ++ "=" ++ show n ++ ";") acc
                 _ -> acc
 
-            Ir.Function name' params returnType expr ->
-                let name = if name' == "main" then ng_entryPoint else name' in
-                let locals = foldl (\acc (name, t) -> Map.insert name t acc) context params in
+            Ir.Function fnName params returnType expr ->
+                let name = if fnName == "main" then ng_entryPoint else fnName in
+                let locals = foldl (\acc' (name1, t) -> Map.insert name1 t acc') context params in
                 let signature = generateFunctionSignature name params returnType in
-                let body = generateFunctionBody (Context locals 0) expr returnType in
+                let body = generateFunctionBody expr returnType (Context locals 0) in
                 addDeclaration (signature ++ ";") . addFunction (signature ++ body) $ acc
             _ -> acc
 
@@ -77,7 +86,8 @@ generateOutput ir = foldl predicate output ir
                 Ir.Constant name t _ -> Map.insert name t acc
                 Ir.Function name params rt _ -> Map.insert name (Ir.FunctionT (map snd params) rt) acc
                 Ir.Extern name t -> Map.insert name t acc
-                Ir.Lambda id' params rt _ _ -> undefined)
+                Ir.Lambda id' params rt _ _ -> undefined
+                _ -> undefined)
             Map.empty
             ir
 
@@ -107,23 +117,31 @@ generateFunctionSignature name params returnType =
         genParams = if null params then "ng_Unit" else
             foldl (\acc (n, t) ->
                 acc ++
-                (if null acc then "" else ",") ++ (typeToString t) ++ " " ++ n)
+                (if null acc then "" else ",") ++ typeToString t ++ " " ++ n)
                 "" params
 
--- TODO: Put context at the end
-
-generateFunctionBody :: Context -> Ir.Expr -> Ir.Type -> String
-generateFunctionBody ctx expr returnType =
-    let (src, res, _, _) = generateExpr ctx expr in
+generateFunctionBody :: Ir.Expr -> Ir.Type -> Context -> String
+generateFunctionBody expr returnType ctx =
+    let (ExprOutput _ result code) = evalState (generateExpr expr) ctx in
     case returnType of
-        Ir.UnitT -> "{\n" ++ src ++ "}\n"
-        _ -> "{\n" ++ src ++ "return " ++ res ++ ";\n" ++ "}\n"
+        Ir.UnitT -> "{\n" ++ code ++ "}\n"
+        _ -> "{\n" ++ code ++ "return " ++ result ++ ";\n" ++ "}\n"
 
 data ExprOutput = ExprOutput
-    { getResult :: String
+    { getType :: Ir.Type
+    , getResult :: String
     , getCode :: String
-    , getType :: Ir.Type
     }
+
+boolToString :: Bool -> String
+boolToString b = if b then "true" else "false"
+
+getTempVar :: State Context String
+getTempVar = do
+    ctx <- get
+    let varIndex = getVarIndex ctx
+    put ctx { getVarIndex = varIndex + 1 }
+    pure $ "_ng_tmpvar_" ++ show varIndex
 
 -- All expression results are stored in a temporary variable before being used.
 -- This bypasses the limitations of C and the compiler optimizes it all away anyway.
@@ -133,102 +151,111 @@ data ExprOutput = ExprOutput
 --
 -- SourceCode is the required setup code for the expression that needs to run before it
 -- ExprResult is the actualt expression you can pass to function calls and such
-generateExpr :: Context -> Ir.Expr -> (SourceCode, ExprResult, Ir.Type, Context)
-generateExpr ctx@(Context locals varIndex) expr = case expr of
-    Ir.StringL str -> ("", generateStringL str, Ir.StringT, ctx)
-    Ir.StringSliceL str -> ("", generateStringSliceL str, Ir.StringSliceT, ctx)
-    Ir.IntL n -> ("", show n, Ir.IntT, ctx)
-    Ir.BoolL b -> ("", if b then "true" else "false", Ir.BoolT, ctx)
-    Ir.UnitL -> ("", "", Ir.UnitT, ctx)
+generateExpr :: Ir.Expr -> State Context ExprOutput
+generateExpr expr = case expr of
+    Ir.StringL str -> pure $ ExprOutput Ir.StringT (generateStringL str) ""
+    Ir.StringSliceL str -> pure $ ExprOutput Ir.StringSliceT (generateStringSliceL str) ""
+    Ir.IntL n -> pure $ ExprOutput Ir.IntT (show n) ""
+    Ir.BoolL b -> pure $ ExprOutput Ir.BoolT (boolToString b) ""
+    Ir.UnitL -> pure $ ExprOutput Ir.UnitT "" ""
 
-    Ir.Label name -> (name ++ ":;\n", "", Ir.UnitT, ctx)
-    Ir.Jump label -> ("goto " ++ label ++ ";\n", "", Ir.UnitT, ctx)
+    Ir.Label name -> pure $ ExprOutput Ir.UnitT "" (name ++ ":;\n")
+    Ir.Jump label -> pure $ ExprOutput Ir.UnitT "" ("goto " ++ label ++ ";\n")
 
-    Ir.Cond cond trueBranch falseBranch ->
-        let var = generateTempVarName ctx in
-        let (src1, res1, _, ctx1) = generateExpr (Context locals (varIndex + 1)) cond in
-        let (src2, res2, type2, _) = generateExpr ctx1 trueBranch in
-        let (src3, res3, type3, _) = generateExpr ctx1 falseBranch in
-        if Ir.isUnit type2 && Ir.isUnit type3 then
-            (src1 ++ 
-             "if(" ++ res1 ++ "){\n" ++ src2 ++ "}\n" ++
-             "else {\n" ++ src3 ++ "}\n",
-             var, Ir.UnitT, ctx1)
+    Ir.Cond cond trueBranch falseBranch -> do
+        var <- getTempVar
+        out1 <- generateExpr cond
+        out2 <- generateExpr trueBranch
+        out3 <- generateExpr falseBranch
+        
+        if Ir.isUnit (getType out2) && Ir.isUnit (getType out3) then
+            pure $ ExprOutput Ir.UnitT "" $
+                getCode out1 ++
+                "if(" ++ getResult out1 ++ "){\n" ++
+                    getCode out2 ++
+                "}\n" ++ "else{\n" ++
+                    getCode out3 ++
+                "}\n"
         else
-            (generateVariable type2 var ++ "\n" ++ 
-             src1 ++ 
-             "if(" ++ res1 ++ "){\n" ++ src2 ++
-                (if Ir.isUnit type2 then "" else generateAssignment var res2 ++ "\n") ++
-             "}\n" ++
-             "else {\n" ++ src3 ++ 
-                (if Ir.isUnit type3 then "" else generateAssignment var res3 ++ "\n") ++
-             "}\n",
-             var, if Ir.isUnit type2 then type3 else type2, ctx1)
+            let type2 = getType out2
+                type3 = getType out3 in 
+            pure $ ExprOutput (if Ir.isUnit type2 then type3 else type2) var $
+                generateVariable type2 var ++ "\n" ++
+                getCode out1 ++
+                "if(" ++ getResult out1 ++ "){\n" ++
+                    getCode out2 ++
+                    (if Ir.isUnit type2 then "" else generateAssignment var $ getResult out2 ++ "\n") ++
+                "}\n" ++ "else{\n" ++
+                    getCode out3 ++
+                    (if Ir.isUnit type3 then "" else generateAssignment var $ getResult out3 ++ "\n") ++
+                "}\n"
 
-    Ir.Chain action cont ->
-        let (src1, _, _, ctx1) = generateExpr ctx action in
-        let (src2, res2, type2, ctx2) = generateExpr ctx1 cont in
-        (src1 ++ src2, res2, type2, ctx2)
+    Ir.Chain action cont -> do
+        out1 <- generateExpr action
+        out2 <- generateExpr cont
+        pure $ ExprOutput (getType out2) (getResult out2) (getCode out1 ++ getCode out2)
 
-    Ir.Clone name -> case fromJust $ Map.lookup name locals of
-        Ir.IntT -> ("", name, Ir.IntT, ctx)
-        Ir.BoolT -> ("", name, Ir.BoolT, ctx)
-        Ir.StringT -> ("", cloneString $ sliceString name, Ir.StringT, ctx)
+    Ir.Clone name -> do
+        varType <- gets $ getLocalType name
+        case varType of
+            Ir.IntT -> pure $ ExprOutput Ir.IntT name ""
+            Ir.BoolT -> pure $ ExprOutput Ir.BoolT name ""
+            Ir.StringT -> pure $ ExprOutput Ir.StringT (cloneString $ sliceString name) ""
+            Ir.StringSliceT -> pure $ ExprOutput Ir.StringSliceT (cloneString name) ""
+            _ -> undefined
+        
+    Ir.Move name -> do
+        varType <- gets $ getLocalType name
+        pure $ ExprOutput varType name ""
 
-        -- I am not sure if I want this to be cloning into a string or just copying the slice
-        -- I think if you want to copy a slice you use the Slice instruction instead since slices are a special type
-        Ir.StringSliceT -> ("", cloneString name, Ir.StringT, ctx)
-        _ -> undefined
+    Ir.Slice name -> do
+        varType <- gets $ getLocalType name
+        case varType of
+            Ir.StringT -> pure $ ExprOutput Ir.StringSliceT (sliceString name) ""
+            Ir.StringSliceT -> pure $ ExprOutput Ir.StringSliceT name ""
+            _ -> undefined
 
-    Ir.Move name -> ("", name, fromJust $ Map.lookup name locals, ctx)
+    Ir.Run fn params -> do
+        fnType <- gets $ getLocalType fn
+        let retType = Ir.getFunctionReturnType fnType
 
-    Ir.Slice name -> case fromJust $ Map.lookup name locals of
-        Ir.StringT -> ("", sliceString name, Ir.StringSliceT, ctx)
-        Ir.StringSliceT -> ("", name, Ir.StringSliceT, ctx)
-        _ -> undefined
+        let paramPred e = do
+            out <- generateExpr e
+            pure (getResult out, getCode out)
 
-    Ir.Run fn params ->
-        -- I don't understand the indendation error here
-        let retType = case fromJust $ Map.lookup fn locals of
-                Ir.FunctionT _ rt -> rt
-                _ -> undefined
-        in
+        zippedResult <- mapM paramPred params
+        let (params', paramCode) = unzip zippedResult
+        let paramPassingCode = foldl (\acc p -> acc ++ (if null acc then "" else ",") ++ p) "" params'
 
-        -- This is unreadable.
-        let (params', paramSrc, ctx') = foldl (\(acc, src, ctx1) e ->
-                let (src', res', _, ctx2) = generateExpr ctx1 e 
-                in (acc ++ [res'], src ++ src', ctx2))
-                ([], "", ctx) params
-        in
+        if Ir.isUnit retType then
+            pure $ ExprOutput Ir.UnitT "" 
+                (concat paramCode ++
+                fn ++ "(" ++ paramPassingCode ++ ");\n")
+        else
+            -- The difference here is that we are returning the function call as an expression instead of a statement
+            pure $ ExprOutput retType
+                (fn ++ "(" ++ paramPassingCode ++ ");\n")
+                (concat paramCode)
 
-        case retType of
-            Ir.UnitT -> 
-                (paramSrc ++ fn ++ "(" ++ (foldl (\acc p -> acc ++ (if null acc then "" else ",") ++ p) "" params') ++ ");\n",
-                 "", retType, ctx')
-            _ ->
-                (paramSrc, 
-                 fn ++ "(" ++ (foldl (\acc p -> acc ++ (if null acc then "" else ",") ++ p) "" params') ++ ")",
-                 retType, ctx')
+    Ir.Mutate name value -> do
+        out <- generateExpr value
+        pure $ ExprOutput Ir.UnitT "" (getCode out ++ generateAssignment name (getResult out) ++ "\n")
 
-    Ir.Mutate name value ->
-        let (src1, res1, _, ctx1) = generateExpr ctx value in
-        (src1 ++ generateAssignment name res1 ++ "\n", "", Ir.UnitT, ctx1)
+    Ir.Def name type' value -> do
+        out <- generateExpr value
+        modify $ addLocal name type'
+        pure $ ExprOutput Ir.UnitT "" (getCode out ++ generateInitializedVariable type' name (getResult out) ++ "\n")
 
-    Ir.Def name tp value ->
-        let (src1, res1, _, Context locals1 varIndex1) = generateExpr ctx value in
-        let ctx1 = Context (Map.insert name tp locals1) varIndex1 in
-        (src1 ++ generateInitializedVariable tp name res1 ++ "\n", "", Ir.UnitT, ctx1)
-
-    Ir.Drop vars ->
-        (foldl
-            (\acc x -> case fromJust $ Map.lookup x locals of
-                Ir.StringT -> acc ++ "ng_dropString(" ++ x ++ ");\n"
-                _ -> undefined)
-            "" vars, "", Ir.UnitT, ctx)
-
+    Ir.Drop vars -> do
+        locals <- gets getLocals
+        let code = concatMap
+                (\x -> case fromJust $ Map.lookup x locals of
+                    Ir.StringT -> "ng_dropString(" ++ x ++ ");\n"
+                    _ -> undefined) vars
+        pure $ ExprOutput Ir.UnitT "" code
+        
     _ -> undefined
     where
-        generateTempVarName (Context _ i) = "_ng_tmpvar_" ++ show i
         generateVariable type' name = typeToString type' ++ " " ++ name ++ ";"
         generateAssignment name e = name ++ "=" ++ e ++ ";"
         generateInitializedVariable type' name e = typeToString type' ++ " " ++ name ++ "=" ++ e ++ ";"
